@@ -1,10 +1,10 @@
-🦿 Adaptive Hexapod Locomotion
+Adaptive Hexapod Locomotion
 
 Adaptive Hexapod Locomotion — экспериментальный проект по обучению шестиногого робота автономной ходьбе с использованием методов машинного обучения и reinforcement learning.
 
 Проект использует PPO (Proximal Policy Optimization) в сочетании с эволюционным подходом для отбора и развития наиболее успешных агентов.
 
-🚧 Project Status
+Project Status
 
 The project is currently in the early stages of development.
 
@@ -14,7 +14,7 @@ The project is currently in the early stages of development.
 
 Проект является активной экспериментальной разработкой и будет постепенно обновляться по мере получения новых результатов.
 
-🎯 Project Goal
+Project Goal
 
 Основная цель проекта — разработать систему, которая сможет самостоятельно обучить шестиногого робота устойчивой и эффективной ходьбе без заранее заданных траекторий движения ног.
 
@@ -26,7 +26,7 @@ The project is currently in the early stages of development.
 поддерживать заданную скорость;
 формировать эффективные походки;
 адаптироваться к изменению условий окружающей среды.
-🧠 Approach
+Approach
 
 В проекте исследуется комбинация нескольких подходов:
 
@@ -42,7 +42,8 @@ Evolutionary Learning
 отбор лучших результатов;
 перенос параметров;
 мутация и развитие следующих поколений.
-⚙️ Technologies
+
+Technologies
 Python
 PyTorch
 PyBullet
@@ -52,7 +53,7 @@ Evolutionary Algorithms
 
 Модель робота состоит из 6 ног и 18 управляемых степеней свободы.
 
-🔬 Current Development
+Current Development
 
 На раннем этапе основное внимание уделяется:
 
