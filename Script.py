@@ -91,7 +91,7 @@ class World:
 
     def freeze_normalization(self):
         self.normalize_frozen = True
-        print("🔒 Нормализация заморожена")
+        print("Нормализация заморожена")
         print("State mean:", self.state_mean)
         print("State std :", self.state_std)
     @staticmethod
@@ -569,7 +569,7 @@ class RobotAgent:
         self.values = []
         self.rewards = []
         self.dones = []
-        self.episode_rewards = []      #
+        self.episode_rewards = []   
 
 def create_robots(num_agents):
     robots = []
@@ -612,13 +612,13 @@ def save_model(agent, world, path):
         'normalization_frozen': world.normalize_frozen
     }, path)
 
-    print(f"✅ Model saved to {path}")
+    print(f"Model saved to {path}")
 
 def load_model(agent, world, path):
 
     if not os.path.exists(path):
 
-        print(f"⚠️ Файл не найден: {path}")
+        print(f"Файл не найден: {path}")
         return False
 
     checkpoint = torch.load(path,map_location=DEVICE,weights_only=False)
@@ -649,7 +649,7 @@ def load_model(agent, world, path):
     if checkpoint.get('normalization_frozen',False):
         world.freeze_normalization()
 
-    print(f"📂 Model loaded from {path}")
+    print(f"Model loaded from {path}")
 
     return True
 
@@ -721,7 +721,7 @@ def evaluate_agent_once(world,agent,test_robot,max_steps=2048,num_tests=5):
 def evolve_population(world,agents,test_robot,num_leaders=2,global_best_agent=None,global_best_score=-float('inf'),mutation_strength=0.001):
 
     print("\n" + "=" * 60)
-    print("🧬 ЭВОЛЮЦИЯ ПОПУЛЯЦИИ")
+    print("ЭВОЛЮЦИЯ ПОПУЛЯЦИИ")
     print("=" * 60)
 
     # 1. ОЦЕНКА ВСЕХ АГЕНТОВ
@@ -743,7 +743,7 @@ def evolve_population(world,agents,test_robot,num_leaders=2,global_best_agent=No
     best_idx = int(ranking[0])
     best_score = scores[best_idx]
 
-    print("\n🏆 РЕЙТИНГ:")
+    print("\nРЕЙТИНГ:")
 
     for rank, idx in enumerate(ranking):
         print(f"{rank + 1}. "f"Robot {idx} = "f"{scores[idx]:.2f}")
@@ -756,16 +756,16 @@ def evolve_population(world,agents,test_robot,num_leaders=2,global_best_agent=No
         global_best_score = best_score
         save_model(global_best_agent,world,os.path.join(CHECKPOINT_DIR,"hexapod_ppo_best.pth"))
 
-        print(f"\n🏆 НОВЫЙ GLOBAL BEST: "f"{global_best_score:.2f}")
+        print(f"\nНОВЫЙ GLOBAL BEST: "f"{global_best_score:.2f}")
 
     else:
-        print(f"\n🌟 GLOBAL BEST СОХРАНЁН: "f"{global_best_score:.2f}")
+        print(f"\nGLOBAL BEST СОХРАНЁН: "f"{global_best_score:.2f}")
 
     # 4. ТЕКУЩИЕ ЛИДЕРЫ
 
     leaders_indices = ranking[:num_leaders]
 
-    print(f"\n👑 ЛИДЕРЫ: "f"{leaders_indices.tolist()}")
+    print(f"\nЛИДЕРЫ: "f"{leaders_indices.tolist()}")
 
     # 5. КОПИРУЕМ ТЕКУЩИХ ЛИДЕРОВ
 
@@ -832,7 +832,7 @@ def update_mutation(current_mutation,improved,stagnant_generations):
         # Делаем поиск более точным.
         current_mutation *= MUTATION_DECREASE_FACTOR
         stagnant_generations = 0
-        print(f"📉 Улучшение! "f"Мутация уменьшена до {current_mutation:.6f}")
+        print(f"Улучшение! "f"Мутация уменьшена до {current_mutation:.6f}")
 
     else:
         stagnant_generations += 1
@@ -842,7 +842,7 @@ def update_mutation(current_mutation,improved,stagnant_generations):
         if stagnant_generations >= STAGNATION_LIMIT:
             current_mutation *= MUTATION_INCREASE_FACTOR
             stagnant_generations = 0
-            print(f"🚨 ЗАСТОЙ! "f"Мутация увеличена до {current_mutation:.6f}")
+            print(f"ЗАСТОЙ! "f"Мутация увеличена до {current_mutation:.6f}")
 
     # Жёсткие границы
     current_mutation = np.clip(current_mutation,MIN_ACTOR_MUTATION,MAX_ACTOR_MUTATION)
@@ -867,7 +867,7 @@ def train():
     test_robot = create_test_robot()
 
     if test_robot is None:
-        print("❌ Не удалось создать тестового робота.")
+        print("Не удалось создать тестового робота.")
         return
 
     # У каждого робота СВОЯ нейросеть
@@ -875,9 +875,9 @@ def train():
 
     if MODE == "TEST":
         if not load_model(agents[0], MODEL_FILE):
-            print("❌ Для режима TEST не удалось загрузить модель. Завершаем.")
+            print("Для режима TEST не удалось загрузить модель. Завершаем.")
             return
-        print("🧪 Запуск в режиме TEST — обучение отключено.")
+        print("Запуск в режиме TEST — обучение отключено.")
         # Здесь можно добавить отдельный цикл теста, если нужно
         return
 
@@ -899,9 +899,9 @@ def train():
         # Восстанавливаем Global Best
         global_best_agent = clone_agent(agents[0])
 
-        print("🌟 Global Best загружен")
+        print("Global Best загружен")
 
-    print(f"🚀 Начало обучения: {num_agents} роботов, у каждого своя сеть.")
+    print(f"Начало обучения: {num_agents} роботов, у каждого своя сеть.")
 
     episode_step_count = [0] * num_agents
 
@@ -1018,7 +1018,7 @@ def train():
 
                 now_mutation, stagnant_generations = update_mutation(now_mutation,improved,stagnant_generations)
 
-                print(f"🔬 Mutation: {now_mutation:.6f} | "f"Stagnation: {stagnant_generations}")
+                print(f"Mutation: {now_mutation:.6f} | "f"Stagnation: {stagnant_generations}")
 
                 # Global Elite
                 agents[0] = clone_agent(global_best_agent)
@@ -1027,7 +1027,7 @@ def train():
 
                 elite_score = evaluate_agent_once(world,agents[0],test_robot,max_steps=MAX_EPISODE_STEPS,num_tests=2)
 
-                print(f"🛡 ПРОВЕРКА ELITE: "f"{elite_score:.2f} | "f"GLOBAL BEST: {global_best_score:.2f}")
+                print(f"ПРОВЕРКА ELITE: "f"{elite_score:.2f} | "f"GLOBAL BEST: {global_best_score:.2f}")
 
                 # СБРОС ПОСЛЕ ЭВОЛЮЦИИ
 
@@ -1039,7 +1039,7 @@ def train():
         print(f"Steps: {total_steps} | Avg reward: {avg_reward:.3f} | Best avg episode reward: {global_best_score:.2f}")
 
 
-    print("✅ Обучение завершено.")
+    print("Обучение завершено.")
 
 
     if test_robot is not None:
