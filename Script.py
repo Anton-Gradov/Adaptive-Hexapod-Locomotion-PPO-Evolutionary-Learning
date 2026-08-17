@@ -14,21 +14,21 @@ from torch.distributions import Normal
 MODE = "TRAIN"  # "TRAIN" или "TEST"
 MODEL_FILE = "hexapod_ppo_best.pth"
 CHECKPOINT_DIR = "checkpoints"
-SAVE_EVERY_STEPS = 20000
+SAVE_EVERY_STEPS = 40000
 TOTAL_STEPS_TO_TRAIN = 1000000
 NORMALIZATION_WARMUP_STEPS = 20000
-EVOLUTION_EVERY_STEPS = 20000
+EVOLUTION_EVERY_STEPS = 40000
 
 USE_MUTATION_BASED_SELECTION = True
 
-NUM_LEADERS = 2
+NUM_LEADERS = 3
 ELITE_COUNT = 1
 
-CRITIC_MUTATION = 0.0
+CRITIC_MUTATION = 0.005
 LOG_STD_MUTATION = 0.0
 
 MAX_ACTOR_MUTATION = 0.01
-MIN_ACTOR_MUTATION = 0.001
+MIN_ACTOR_MUTATION = 0.0001
 
 # Насколько увеличивать мутацию при застое
 MUTATION_INCREASE_FACTOR = 1.5
@@ -37,19 +37,19 @@ MUTATION_INCREASE_FACTOR = 1.5
 MUTATION_DECREASE_FACTOR = 0.90
 
 # После скольких поколений без улучшения усиливаем поиск
-STAGNATION_LIMIT = 3
+STAGNATION_LIMIT = 1
 
 
 STATE_DIM = 41
 ACTION_DIM = 18
 
-ACTION_SCALE = 0.1
+ACTION_SCALE = 0.2
 
 GAMMA = 0.99
 GAE_LAMBDA = 0.95
 
 LEARNING_RATE = 1e-5
-PPO_EPOCHS = 10
+PPO_EPOCHS = 20
 MINIBATCH_SIZE = 64
 
 VALUE_COEF = 0.5
@@ -91,7 +91,7 @@ class World:
 
     def freeze_normalization(self):
         self.normalize_frozen = True
-        print("Нормализация заморожена")
+        print("🔒 Нормализация заморожена")
         print("State mean:", self.state_mean)
         print("State std :", self.state_std)
     @staticmethod
@@ -154,12 +154,9 @@ class World:
 
         # НОРМАЛИЗАЦИЯ
 
-        normalized = (state_arr - self.state_mean) / (self.state_std + self.eps)
+        state_arr = np.asarray(state, dtype=np.float64)
 
-        # Дополнительная защита
-        normalized = np.clip(normalized,-10.0,10.0)
-
-        return normalized.astype(np.float32).tolist()
+        return state_arr.astype(np.float32).tolist()
 
     def get_state_for_agent(self, robot, agent):
 
@@ -185,11 +182,9 @@ class World:
 
         state_arr = np.asarray(state,dtype=np.float64)
 
-        normalized = (state_arr - self.state_mean) / (self.state_std + self.eps)
+        state_arr = np.asarray(state, dtype=np.float64)
 
-        normalized = np.clip(normalized,-10.0,10.0)
-
-        return normalized.astype(np.float32).tolist()
+        return state_arr.astype(np.float32).tolist()
 
     def reset_robot(self, robot, position):
         x, y = position
@@ -249,7 +244,7 @@ class World:
             p.setJointMotorControl2(robot,i,p.POSITION_CONTROL,targetPosition=float(target),force=40)
 
     def get_reward(self, robot):
-        reward = 1.0
+        reward = 1
         dead = False
 
         velocity, angular_velocity = p.getBaseVelocity(robot)
@@ -263,52 +258,17 @@ class World:
         height = position[2]
         target_height = 0.20
 
-        # 1. ВЫСОТА
+        # ВЫСОТА
 
-        height_error = height - target_height
-        reward -= height_error * height_error * 60.0
-
-
-        # 2. НАКЛОН
-
-        tilt_error = roll ** 2 + pitch ** 2
-        reward -= tilt_error * 3.0
-
-        # 3. ДВИЖЕНИЕ КОРПУСА
-
-        horizontal_speed = math.sqrt(vx * vx + vy * vy)
-        reward -= horizontal_speed * 1.0
-
-        # 4. ВРАЩЕНИЕ
-
-        angular_speed = math.sqrt(wx * wx + wy * wy)
-        reward -= angular_speed * 0.3
+        height_error = target_height -  height
+        reward -= height_error * 80.0
 
         # КАЧЕСТВО СТОЙКИ
 
-        stability_score = 1.0
+        tilt_error = abs(roll) + abs(pitch)
+        reward -= tilt_error * 2.0
 
-        stability_score -= min(abs(roll) / 0.2, 1.0)
-        stability_score -= min(abs(pitch) / 0.2, 1.0)
-        stability_score -= min(abs(height_error) / 0.06, 1.0)
-        stability_score -= min(horizontal_speed / 0.3, 1.0)
-
-        stability_score = max(0.0, stability_score)
-
-        reward += stability_score * 10.0
-
-        # 6. КОНТАКТ ВСЕХ НОГ
-        FOOT_LINKS = [2, 5, 8, 11, 14, 17]
-        foot_contacts = 0
-
-        for link in FOOT_LINKS:
-            contacts = p.getContactPoints(bodyA=robot,bodyB=self.plane,linkIndexA=link)
-            if contacts:
-                foot_contacts += 1
-
-        reward += foot_contacts * 1.0
-
-        # 7. КОНТАКТ КОРПУСА
+        # КОНТАКТ КОРПУСА
 
         contacts = p.getContactPoints(bodyA=robot,bodyB=self.plane)
         body_contact = False
@@ -320,22 +280,13 @@ class World:
                 body_contact = True
                 break
 
-        # 8. ПАДЕНИЕ
+        # ПАДЕНИЕ
 
-        if abs(roll) > 1.0 or abs(pitch) > 1.0:
+        if abs(roll) > 1.0 or abs(pitch) > 1.0 or body_contact:
             dead = True
-            reward -= 50.0
-
-        # Пока НЕ убиваем за body_contact
-        # После диагностики можно добавить:
-        #
-        # if body_contact:
-        #     dead = True
-        #     reward -= 10.0
-
-        # =========================
-        # 9. NaN / Inf
-        # =========================
+        if not dead:
+            reward += 0.1
+        # NaN / Inf
 
         if math.isnan(reward) or math.isinf(reward):
             reward = -10.0
@@ -569,7 +520,7 @@ class RobotAgent:
         self.values = []
         self.rewards = []
         self.dones = []
-        self.episode_rewards = []   
+        self.episode_rewards = []      #
 
 def create_robots(num_agents):
     robots = []
@@ -593,47 +544,37 @@ def create_robots(num_agents):
 
     return robots, positions
 
-def save_model(agent, world, path):
+def save_model(historical_best_agent, historical_best_score, world, path):
     directory = os.path.dirname(path)
 
     if directory:
-        os.makedirs(directory,exist_ok=True)
+        os.makedirs(directory, exist_ok=True)
 
-    torch.save({
-        'actor_state_dict': agent.actor.state_dict(),
-        'critic_state_dict': agent.critic.state_dict(),
-        'log_std': agent.log_std.detach().cpu(),
-        'optimizer_state_dict': agent.optimizer.state_dict(),
-
+    checkpoint = {
         'state_mean': world.state_mean,
         'state_std': world.state_std,
         'state_M2': world.state_M2,
         'state_count': world.count,
-        'normalization_frozen': world.normalize_frozen
-    }, path)
+        'normalization_frozen': world.normalize_frozen,
+        'historical_best_score': float(historical_best_score),
+        'historical_best_actor': historical_best_agent.actor.state_dict(),
+        'historical_best_critic': historical_best_agent.critic.state_dict(),
+        'historical_best_log_std': historical_best_agent.log_std.detach().cpu(),
+        'historical_best_optimizer': historical_best_agent.optimizer.state_dict()
+    }
+
+    torch.save(checkpoint, path)
 
     print(f"Model saved to {path}")
 
-def load_model(agent, world, path):
 
+def load_model(world, path):
     if not os.path.exists(path):
-
         print(f"Файл не найден: {path}")
-        return False
+        return None, -float('inf')
 
     checkpoint = torch.load(path,map_location=DEVICE,weights_only=False)
 
-    # PPO
-    agent.actor.load_state_dict(checkpoint['actor_state_dict'])
-    agent.critic.load_state_dict(checkpoint['critic_state_dict'])
-
-    with torch.no_grad():
-        agent.log_std.copy_(checkpoint['log_std'].to(DEVICE))
-
-    if 'optimizer_state_dict' in checkpoint:
-        agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-    # ОБЩАЯ НОРМАЛИЗАЦИЯ
     if 'state_mean' in checkpoint:
         world.state_mean = np.asarray(checkpoint['state_mean'],dtype=np.float64)
 
@@ -646,12 +587,31 @@ def load_model(agent, world, path):
     if 'state_count' in checkpoint:
         world.count = int(checkpoint['state_count'])
 
-    if checkpoint.get('normalization_frozen',False):
+    if checkpoint.get('normalization_frozen', False):
         world.freeze_normalization()
 
-    print(f"Model loaded from {path}")
+    if 'historical_best_actor' not in checkpoint:
+        print("В файле нет исторического лидера.")
+        return None, -float('inf')
 
-    return True
+    historical_best = PPOAgent(STATE_DIM,ACTION_DIM)
+
+    historical_best.actor.load_state_dict(checkpoint['historical_best_actor'])
+
+    historical_best.critic.load_state_dict(checkpoint['historical_best_critic'])
+
+    with torch.no_grad():
+        historical_best.log_std.copy_(checkpoint['historical_best_log_std'].to(DEVICE))
+
+    if 'historical_best_optimizer' in checkpoint:
+        historical_best.optimizer.load_state_dict(checkpoint['historical_best_optimizer'])
+
+    historical_best_score = float(
+        checkpoint.get('historical_best_score',-float('inf')))
+
+    print(f"Загружен исторический лидер: {historical_best_score:.2f}")
+
+    return historical_best, historical_best_score
 
 def create_test_robot():
 
@@ -712,108 +672,100 @@ def evaluate_agent_once(world,agent,test_robot,max_steps=2048,num_tests=5):
 
         test_scores.append(total_reward)
 
-    mean_score = float(np.min(test_scores))
+    mean_score = np.mean(test_scores)
+    std_score = np.std(test_scores)
+    fitness = mean_score - 0.3 * std_score
 
-    print(f"   Тесты: "f"{[round(x, 2) for x in test_scores]} "f"→ Минимальное: {mean_score:.2f}")
+    print(f"   Тесты: "f"{[round(x, 2) for x in test_scores]} "f"→ Оценка: {fitness:.2f}")
 
-    return mean_score
+    return fitness
 
-def evolve_population(world,agents,test_robot,num_leaders=2,global_best_agent=None,global_best_score=-float('inf'),mutation_strength=0.001):
-
+def evolve_population(world,agents,test_robot,historical_best_agent,historical_best_score,mutation_strength=0.001):
     print("\n" + "=" * 60)
     print("ЭВОЛЮЦИЯ ПОПУЛЯЦИИ")
     print("=" * 60)
-
-    # 1. ОЦЕНКА ВСЕХ АГЕНТОВ
 
     scores = []
 
     for i, agent in enumerate(agents):
         score = evaluate_agent_once(world,agent,test_robot,max_steps=MAX_EPISODE_STEPS,num_tests=3)
-        scores.append(score)
-        print(
-            f"Robot {i}: "
-            f"{score:.2f}"
-        )
-
-    # 2. ОПРЕДЕЛЯЕМ ЛУЧШЕГО
+        scores.append(float(score))
+        print(f"Robot {i}: {score:.2f}")
 
     ranking = np.argsort(scores)[::-1]
-
-    best_idx = int(ranking[0])
-    best_score = scores[best_idx]
 
     print("\nРЕЙТИНГ:")
 
     for rank, idx in enumerate(ranking):
-        print(f"{rank + 1}. "f"Robot {idx} = "f"{scores[idx]:.2f}")
+        print(f"{rank + 1}. "
+            f"Robot {idx} = {scores[idx]:.2f}")
 
-    # 3. ОБНОВЛЯЕМ GLOBAL BEST
+    current_leaders = []
+    num_current_leaders = min(2, len(agents))
 
-    if global_best_agent is None or best_score > global_best_score:
+    for idx in ranking[:num_current_leaders]:
+        current_leaders.append((float(scores[idx]),clone_agent(agents[int(idx)])))
 
-        global_best_agent = clone_agent(agents[best_idx])
-        global_best_score = best_score
-        save_model(global_best_agent,world,os.path.join(CHECKPOINT_DIR,"hexapod_ppo_best.pth"))
+    print("\nТЕКУЩИЕ ЛИДЕРЫ:")
 
-        print(f"\nНОВЫЙ GLOBAL BEST: "f"{global_best_score:.2f}")
+    for i, (score, _) in enumerate(current_leaders):
+        print(f"{i + 1}. {score:.2f}")
 
+    current_best_score = current_leaders[0][0]
+
+    if current_best_score > historical_best_score:
+        historical_best_score = current_best_score
+        historical_best_agent = clone_agent(current_leaders[0][1])
+
+        print(f"\nНОВЫЙ ИСТОРИЧЕСКИЙ BEST: "
+            f"{historical_best_score:.2f}")
+
+        save_model(historical_best_agent,historical_best_score,world,os.path.join(CHECKPOINT_DIR,"hexapod_ppo_best.pth"))
     else:
-        print(f"\nGLOBAL BEST СОХРАНЁН: "f"{global_best_score:.2f}")
-
-    # 4. ТЕКУЩИЕ ЛИДЕРЫ
-
-    leaders_indices = ranking[:num_leaders]
-
-    print(f"\nЛИДЕРЫ: "f"{leaders_indices.tolist()}")
-
-    # 5. КОПИРУЕМ ТЕКУЩИХ ЛИДЕРОВ
-
-    leader_models = []
-
-    for idx in leaders_indices:
-        leader = clone_agent(agents[idx])
-        leader_models.append(leader)
-
-    # 6. НОВОЕ ПОКОЛЕНИЕ
+        print(f"\nИСТОРИЧЕСКИЙ BEST СОХРАНЁН: "
+            f"{historical_best_score:.2f}")
 
     new_agents = []
 
-    # GLOBAL ELITE
+    for i, (score, leader) in enumerate(current_leaders):
+        new_agents.append(clone_agent(leader))
 
-    elite = clone_agent(global_best_agent)
-    new_agents.append(elite)
-    print(f"\n🛡 GLOBAL ELITE: "f"{global_best_score:.2f}")
+        print(f"Лидер {i + 1}: "
+            f"{score:.2f}")
 
-    # ВТОРОЙ ЛИДЕР
+    mutation_factors = [
+        random.uniform(0.5, 1.0),
+        random.uniform(0.5, 1.0)
+    ]
 
-    if num_leaders > 1:
-        second_elite = clone_agent(leader_models[0])
-
-        # если текущий лучший и global best
-        # совпадают, используем второго лидера
-        if best_score == global_best_score and len(leader_models) > 1:
-            second_elite = clone_agent(leader_models[1])
-        new_agents.append(second_elite)
-
-    # ПОТОМКИ
+    mutant_count = 0
 
     while len(new_agents) < len(agents):
-
-        parent = leader_models[(len(new_agents) - num_leaders) % len(leader_models)]
+        parent_index = mutant_count % len(current_leaders)
+        parent_score, parent = current_leaders[parent_index]
+        mutation_factor = mutation_factors[parent_index]
         child = clone_agent(parent)
-        child.mutate(actor_strength=mutation_strength,critic_strength=CRITIC_MUTATION,log_std_strength=LOG_STD_MUTATION)
+        child.mutate(actor_strength=mutation_strength * mutation_factor,critic_strength=CRITIC_MUTATION,log_std_strength=LOG_STD_MUTATION)
+
         new_agents.append(child)
 
-    # ПРОВЕРКА
+        print(f"Мутант {mutant_count + 1}: "
+            f"от лидера {parent_index + 1} "
+            f"({parent_score:.2f}), "
+            f"mutation="
+            f"{mutation_strength * mutation_factor:.6f}"
+        )
 
-    print(f"\nНовое поколение: "f"{len(new_agents)} агентов")
+        mutant_count += 1
 
-    print(f"Global Elite: 1")
+    print(f"\nНовое поколение: "
+          f"{len(new_agents)} агентов")
+    print(f"Текущих лидеров: "
+          f"{len(current_leaders)}")
+    print(f"Мутантов: "
+          f"{mutant_count}")
 
-    print(f"Мутантов: "f"{len(new_agents) - 2}")
-
-    return new_agents,scores,global_best_agent,global_best_score
+    return new_agents,scores,historical_best_agent,historical_best_score
 
 def update_mutation(current_mutation,improved,stagnant_generations):
     """
@@ -849,19 +801,37 @@ def update_mutation(current_mutation,improved,stagnant_generations):
 
     return current_mutation, stagnant_generations
 
+def update_global_leaders(global_leaders, agents, scores, max_leaders=3):
+    candidates = []
+
+    for agent, score in global_leaders:
+        candidates.append((float(score), clone_agent(agent)))
+
+    for agent, score in zip(agents, scores):
+        candidates.append((float(score), clone_agent(agent)))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    unique_leaders = []
+
+    for score, agent in candidates:
+        unique_leaders.append((score, agent))
+
+        if len(unique_leaders) >= max_leaders:
+            break
+
+    global_leaders = unique_leaders
+
+    return global_leaders
 
 def train():
-    # Начальная мутация
     now_mutation = 0.005
-
-    # Сколько поколений подряд не было улучшения
     stagnant_generations = 0
-
     next_evolution = EVOLUTION_EVERY_STEPS
-
     num_agents = 10
 
-    world = World()  # без робота внутри — создадим сами
+    world = World()
+
     robots, positions = create_robots(num_agents)
 
     test_robot = create_test_robot()
@@ -870,50 +840,37 @@ def train():
         print("Не удалось создать тестового робота.")
         return
 
-    # У каждого робота СВОЯ нейросеть
-    agents = [PPOAgent(STATE_DIM, ACTION_DIM) for _ in range(num_agents)]
-
-    if MODE == "TEST":
-        if not load_model(agents[0], MODEL_FILE):
-            print("Для режима TEST не удалось загрузить модель. Завершаем.")
-            return
-        print("Запуск в режиме TEST — обучение отключено.")
-        # Здесь можно добавить отдельный цикл теста, если нужно
-        return
-
     total_steps = 0
+    historical_best_agent, historical_best_score = load_model(world,MODEL_FILE)
 
-    global_best_agent = None
-    global_best_score = -float('inf')
+    if historical_best_agent is None:
+        print("Обучение начинается с нуля.")
+        historical_best_agent = PPOAgent(STATE_DIM,ACTION_DIM)
+        historical_best_score = -float('inf')
 
-    model_loaded = False
+    else:
+        print(f"Исторический Best: "
+            f"{historical_best_score:.2f}")
 
-    for agent in agents:
+    agents = [clone_agent(historical_best_agent) for _ in range(num_agents)]
 
-        loaded = load_model(agent,world,MODEL_FILE)
+    print(f"Создано {num_agents} копий "
+        f"исторического лидера.")
 
-        if loaded:
-            model_loaded = True
-
-    if model_loaded:
-        # Восстанавливаем Global Best
-        global_best_agent = clone_agent(agents[0])
-
-        print("Global Best загружен")
-
-    print(f"Начало обучения: {num_agents} роботов, у каждого своя сеть.")
+    print(f"Начало обучения: "
+        f"{num_agents} роботов, "
+        f"у каждого своя сеть.")
 
     episode_step_count = [0] * num_agents
 
     while total_steps < TOTAL_STEPS_TO_TRAIN:
-
-        # --- СБОР ДАННЫХ (ROLLOUT) ---
         states_buf = []
         actions_buf = []
         log_probs_buf = []
         values_buf = []
         rewards_buf = []
         dones_buf = []
+
         if not world.normalize_frozen and total_steps >= NORMALIZATION_WARMUP_STEPS:
             world.freeze_normalization()
 
@@ -923,12 +880,8 @@ def train():
             batch_log_probs = []
             batch_values = []
 
-            # 1) Получение состояния и действия
             for i, robot in enumerate(robots):
-                # Сначала обновляем общую статистику
                 world.get_state(robot,update_stats=True)
-
-                # Затем используем snapshot статистики конкретного агента
                 state = world.get_state_for_agent(robot,agents[i])
                 action, log_prob, value = agents[i].get_action(state)
 
@@ -941,106 +894,74 @@ def train():
             actions_buf.append(batch_actions)
             log_probs_buf.append(batch_log_probs)
             values_buf.append(batch_values)
-
-            # Шаг симуляции
-            _, rewards, dones = world.step(robots, batch_actions)
-
+            _, rewards, dones = world.step(robots,batch_actions)
             rewards_buf.append(rewards)
             dones_buf.append(dones)
-            total_steps += len(robots)
+            total_steps += num_agents
 
-            # 2) Сброс: по смерти ИЛИ по лимиту шагов
-            for i, d in enumerate(dones):
-                # Увеличиваем счётчик шагов эпизода
+            for i, done in enumerate(dones):
                 episode_step_count[i] += 1
-
-                # Сброс, если умер ИЛИ если достигли лимита шагов
-                if d or episode_step_count[i] >= MAX_EPISODE_STEPS:
-                    world.reset_robot(robots[i], positions[i])
-                    # Сбрасываем счётчик для этого робота
-                    episode_step_count[i] = 0
-
-
-        # --- ОБУЧЕНИЕ (для каждого агента отдельно) ---
-        for i in range(num_agents):
-
-            s_i = [states[i] for states in states_buf]
-            a_i = [actions[i] for actions in actions_buf]
-            lp_i = [logs[i] for logs in log_probs_buf]
-            v_i = [values[i] for values in values_buf]
-            r_i = [rewards[i] for rewards in rewards_buf]
-            d_i = [dones[i] for dones in dones_buf]
-
-            # GAE
-            if d_i[-1]:
-                last_val = 0.0
-            else:
-                last_val = v_i[-1]
-
-            advantages, returns = calculate_gae(r_i,v_i,d_i,last_val)
-
-            agents[i].train_ppo(s_i, a_i, lp_i, returns, advantages)
-
-        # --- СТАТИСТИКА И СОХРАНЕНИЕ ---
-        # Средняя суммарная награда по всем роботам за этот rollout
-        episode_reward_per_agent = [sum(r_list) for r_list in zip(*rewards_buf)]
-        avg_episode_reward = np.mean(episode_reward_per_agent)
-
-        if total_steps >= SAVE_EVERY_STEPS and (total_steps // SAVE_EVERY_STEPS != (total_steps - num_agents * ROLLOUT_STEPS) // SAVE_EVERY_STEPS):
-            save_model(agents[0],world,os.path.join(CHECKPOINT_DIR,f"hexapod_ppo_step_{total_steps}.pth"))
-
-        # --- ЭВОЛЮЦИЯ (выбираем лучшего кандидата и копируем всем) ---
-        if USE_MUTATION_BASED_SELECTION:
-
-            # ЭВОЛЮЦИЯ
-
-            if total_steps >= next_evolution:
-
-                next_evolution += EVOLUTION_EVERY_STEPS
-
-                # Запоминаем старый GLOBAL BEST
-
-                old_global_best = global_best_score
-
-                # ЭВОЛЮЦИЯ
-
-                agents, scores, global_best_agent, global_best_score = evolve_population(world,agents,test_robot,num_leaders=NUM_LEADERS,global_best_agent=global_best_agent,global_best_score=global_best_score,mutation_strength=now_mutation)
-
-                # Определяем, был ли прогресс
-
-                improved = global_best_score > old_global_best
-
-                # Для самого первого поколения:
-                if old_global_best == -float('inf'):
-                    improved = True
-
-                # АДАПТИВНАЯ МУТАЦИЯ
-
-                now_mutation, stagnant_generations = update_mutation(now_mutation,improved,stagnant_generations)
-
-                print(f"Mutation: {now_mutation:.6f} | "f"Stagnation: {stagnant_generations}")
-
-                # Global Elite
-                agents[0] = clone_agent(global_best_agent)
-
-                # ПРОВЕРКА ELITE
-
-                elite_score = evaluate_agent_once(world,agents[0],test_robot,max_steps=MAX_EPISODE_STEPS,num_tests=2)
-
-                print(f"ПРОВЕРКА ELITE: "f"{elite_score:.2f} | "f"GLOBAL BEST: {global_best_score:.2f}")
-
-                # СБРОС ПОСЛЕ ЭВОЛЮЦИИ
-
-                for i in range(num_agents):
+                if done or episode_step_count[i] >= MAX_EPISODE_STEPS:
                     world.reset_robot(robots[i],positions[i])
                     episode_step_count[i] = 0
 
-        avg_reward = np.mean([r for r_list in rewards_buf for r in r_list])
-        print(f"Steps: {total_steps} | Avg reward: {avg_reward:.3f} | Best avg episode reward: {global_best_score:.2f}")
+        for i in range(num_agents):
+            states_i = [states[i] for states in states_buf]
+            actions_i = [actions[i] for actions in actions_buf]
+            log_probs_i = [logs[i] for logs in log_probs_buf]
+            values_i = [values[i] for values in values_buf]
+            rewards_i = [rewards[i] for rewards in rewards_buf]
+            dones_i = [dones[i] for dones in dones_buf]
 
+            if dones_i[-1]:
+                last_value = 0.0
+            else:
+                last_value = values_i[-1]
+
+            advantages, returns = calculate_gae(rewards_i,values_i,dones_i,last_value)
+            agents[i].train_ppo(states_i,actions_i,log_probs_i,returns,advantages)
+
+        if total_steps >= next_evolution:
+            next_evolution += EVOLUTION_EVERY_STEPS
+            old_historical_best = historical_best_score
+            agents,scores,historical_best_agent,historical_best_score = evolve_population(world,agents,test_robot,historical_best_agent,historical_best_score,mutation_strength=now_mutation)
+            improved = (historical_best_score > old_historical_best)
+
+            if old_historical_best == -float('inf'):
+                improved = True
+
+            now_mutation, stagnant_generations = update_mutation(now_mutation,improved,stagnant_generations)
+
+            print(f"Mutation: {now_mutation:.6f} | "
+                f"Stagnation: {stagnant_generations}")
+
+            print("\nHISTORICAL BEST:")
+            print(f"{historical_best_score:.2f}")
+
+            print("\nCURRENT LEADERS:")
+
+            ranking = np.argsort(scores)[::-1]
+
+            for i, idx in enumerate(ranking[:2]):
+                print(f"{i + 1}. "
+                    f"{scores[idx]:.2f}")
+
+            for i in range(num_agents):
+                world.reset_robot(robots[i],positions[i])
+                episode_step_count[i] = 0
+
+        if total_steps >= SAVE_EVERY_STEPS and (total_steps // SAVE_EVERY_STEPS != (total_steps - num_agents * ROLLOUT_STEPS) // SAVE_EVERY_STEPS):
+
+            save_model(historical_best_agent,historical_best_score,world,os.path.join(CHECKPOINT_DIR,f"hexapod_ppo_step_{total_steps}.pth"))
+
+        avg_reward = np.mean([reward for reward_list in rewards_buf for reward in reward_list])
+
+        print(f"Steps: {total_steps} | "
+            f"Avg reward: {avg_reward:.3f} | "
+            f"Historical Best: "
+            f"{historical_best_score:.2f}")
 
     print("Обучение завершено.")
-
 
     if test_robot is not None:
         p.removeBody(test_robot)
